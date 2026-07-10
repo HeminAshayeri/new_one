@@ -5,6 +5,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 # استفاده از پکیج جدید و رسمی گوگل
 from google import genai
 
+import asyncio
+
 # ۱. خواندن توکن‌ها از بخش Environment Variables سرور رندر (برای امنیت بالا)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -51,19 +53,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # راه اندازی اصلی بات
 def main():
     if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
-        print("خطا: توکن تلگرام یا جمینی در تنظیمات سرور (Env Vars) تعریف نشده است!")
+        print("خطا: توکن تلگرام یا جمینی تعریف نشده است!")
         return
 
-    # ساخت اپلیکیشن تلگرام (بدون نیاز به پروکسی روی سرور رندر)
+    # ساخت اپلیکیشن تلگرام
     application = Application.builder().token(TELEGRAM_TOKEN).build()
 
     # تعریف هندلرها
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("بات تلگرام با موفقیت روی سرور رندر روشن شد و در حال گوش دادن به پیام‌هاست...")
-    application.run_polling()
-
+    print("بات تلگرام با موفقیت روی سرور رندر روشن شد...")
+    
+    # مدیریت استاندارد لوپ برای پایتون ۳.۱۴ روی رندر
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+    loop.run_until_complete(application.initialize())
+    loop.run_until_complete(application.updater.start_polling())
+    loop.run_until_complete(application.start())
+    
+    # زنده نگه داشتن برنامه
+    loop.run_forever()
 
 if __name__ == '__main__':
     main()
