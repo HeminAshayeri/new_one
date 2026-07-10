@@ -82,8 +82,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"Error calling Gemini API: {e}")
         reply_text = "متأسفانه در پردازش این درخواست مشکلی پیش اومد. لطفاً دوباره تلاش کنید."
 
-    # فرستادن پاسخ نهایی به کاربر
-    await update.message.reply_text(reply_text)
+    # فرستادن پاسخ با ریپلای مستقیم روی خود پیام/فایل کاربر  ✅
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=reply_text,
+        reply_to_message_id=message.message_id
+    )
 
 # راه اندازی اصلی بات
 def main():
