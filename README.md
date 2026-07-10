@@ -1,1 +1,3 @@
 # new_one
+python-telegram-bot==21.10
+google-genai
