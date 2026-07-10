@@ -38,7 +38,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # متد جدید پکیج برای تولید پاسخ از جمینی
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model='gemini-3.1-flash-lite',
             contents=user_text,
         )
         reply_text = response.text
