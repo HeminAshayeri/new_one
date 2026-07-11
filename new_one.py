@@ -31,9 +31,7 @@ chats_history = {}
 
 def get_user_count_and_add(user_id):
     try:
-        # اضافه کردن آیدی به مجموعه کاربران در دیتابیس
         r.sadd("bot_users", str(user_id))
-        # گرفتن تعداد کل کاربران واقعی ذخیره شده
         actual_count = r.scard("bot_users")
         return FAKE_BASE + actual_count
     except Exception as e:
@@ -84,8 +82,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
+    # تعریف هویت و دستورالعمل سیستم برای چت جی‌مینی
+    bot_persona = (
+        "Your name is Ariadne. You are a helpful and smart AI assistant. "
+        "Whenever anyone asks your name, who you are, or what your identity is, "
+        "you must firmly and politely reply in Persian: 'من اسمم Ariadne هستم' or 'من Ariadne هستم' "
+        "and continue helping them."
+    )
+
     if user_id not in chats_history:
-        chats_history[user_id] = client.chats.create(model='gemini-3.1-flash-lite')
+        # تزریق هویت Ariadne به تنظیمات اولیه چت مدل فلاش لایت
+        chats_history[user_id] = client.chats.create(
+            model='gemini-3.1-flash-lite',
+            config=types.GenerateContentConfig(system_instruction=bot_persona)
+        )
     
     chat_session = chats_history[user_id]
     contents = []
