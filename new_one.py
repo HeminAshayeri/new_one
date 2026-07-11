@@ -76,7 +76,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await context.bot.send_message(
             chat_id=LOG_GROUP_ID,
-            text=f"🟢 کاربر جدید ربات را استارت کرد:\n👤 نام: {user.full_name}\n🆔 آیدی: {user.id}\n📈 کل کاربران: {total_users:,}"
+            text=f"🟢 کاربر جدید ربات را استارت کرد:\n👤 نام: {user.full_name}\n🆔 آیدی: {user.id}\n 🏷️ یوزرنیم: {user.username}\n📈 کل کاربران: {total_users:,}"
         )
     except Exception as e:
         logging.error(f"Error sending start log: {e}")
