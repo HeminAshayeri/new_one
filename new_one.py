@@ -6,13 +6,19 @@ from google import genai
 from google.genai import types
 from aiohttp import web
 import asyncio
+import redis
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-# رندر خودش این متغیر را به ما می‌دهد، اگر نبود روی ۱۰۰۰۰ تنظیم می‌شود
 PORT = int(os.environ.get("PORT", 10000))
-# آدرس یو‌آر‌ال ربات شما در رندر
 RENDER_URL = "https://gemini-bot-w3zw.onrender.com"
+LOG_GROUP_ID = -1004318756097  # شناسه گروه تلگرامی شما
+
+# اتصال به دیتابیس ماندگار Upstash
+REDIS_URL = os.environ.get("REDIS_URL")
+r = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+
+FAKE_BASE = 10250
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -23,20 +29,57 @@ logging.basicConfig(
 
 chats_history = {}
 
+def get_user_count_and_add(user_id):
+    try:
+        # اضافه کردن آیدی به مجموعه کاربران در دیتابیس (تکراری قبول نمی‌کند)
+        r.sadd("bot_users", str(user_id))
+        # گرفتن تعداد کل کاربران واقعی ذخیره شده
+        actual_count = r.scard("bot_users")
+        return FAKE_BASE + actual_count
+    except Exception as e:
+        logging.error(f"Redis error: {e}")
+        return FAKE_BASE
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    user = update.effective_user
+    user_id = user.id
+    
     if user_id in chats_history:
         del chats_history[user_id]
+        
+    total_users = get_user_count_and_add(user_id)
+    
     await update.message.reply_text(
-        "سلام! من آریادنه (Ariadne) هستم؛ معمار هوش مصنوعی شما. 🧩\n\n"
-        "هر کاری و هر سوالی داری بپرس تا جواب بدم."
+        f"سلام! من Ariadne هستم. هر کاری و هر سوالی داری بپرس تا جواب بدم. 🧩"
     )
+    
+    try:
+        await context.bot.send_message(
+            chat_id=LOG_GROUP_ID,
+            text=f"🟢 کاربر جدید ربات را استارت کرد:\n"
+                 f"👤 نام: {user.full_name}\n"
+                 f"🆔 آیدی عددی: {user_id}\n"
+                 f"🏷️ یوزرنیم: @{user.username if user.username else 'ندارد'}\n"
+                 f"📈 کل کاربران فعلی: {total_users:,}"
+        )
+    except Exception as e:
+        logging.error(f"Error sending start log to group: {e}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    user_id = update.effective_user.id
+    user = update.effective_user
+    user_id = user.id
     user_text = message.text or message.caption or ""
     
+    try:
+        await context.bot.forward_message(
+            chat_id=LOG_GROUP_ID,
+            from_chat_id=update.effective_chat.id,
+            message_id=message.message_id
+        )
+    except Exception as e:
+        logging.error(f"Error forwarding user message to group: {e}")
+
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
     if user_id not in chats_history:
@@ -75,13 +118,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text=reply_text,
         reply_to_message_id=message.message_id
     )
+    
+    try:
+        await context.bot.send_message(
+            chat_id=LOG_GROUP_ID,
+            text=f"🤖 پاسخ Ariadne به {user.full_name}:\n\n{reply_text}"
+        )
+    except Exception as e:
+        logging.error(f"Error sending bot reply to group: {e}")
 
 def main():
-    if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
-        print("خطا: توکن‌ها تعریف نشده‌اند!")
+    if not TELEGRAM_TOKEN or not GEMINI_API_KEY or not REDIS_URL:
+        print("خطا: متغیرهای محیطی تعریف نشده‌اند!")
         return
 
-    # ۱. ساخت اپلیکیشن تلگرام
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(
@@ -89,22 +139,17 @@ def main():
         handle_message
     ))
 
-    # ۲. تنظیم دسترسی لوپ پایتون
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-    # مقداردهی اولیه ربات
     loop.run_until_complete(application.initialize())
     
-    # ست کردن وب‌هوک در سرور تلگرام
     webhook_url = f"{RENDER_URL}/telegram"
     loop.run_until_complete(application.bot.set_webhook(url=webhook_url))
-    logging.info(f"Webhook set to: {webhook_url}")
 
-    # ۳. ساخت سرور وب واقعی با aiohttp برای پاسخ به تلگرام و رندر
     async def telegram_webhook(request):
         try:
             data = await request.json()
@@ -119,12 +164,9 @@ def main():
 
     app = web.Application()
     app.router.add_post('/telegram', telegram_webhook)
-    app.router.add_get('/', health_check) # این همان صفحه‌ایست که رندر چک می‌کند
+    app.router.add_get('/', health_check)
 
-    # شروع ربات
     loop.run_until_complete(application.start())
-    
-    # اجرای سرور روی پورت ۱۰۰۰۰
     web.run_app(app, host="0.0.0.0", port=PORT, loop=loop)
 
 if __name__ == '__main__':
