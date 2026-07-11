@@ -14,12 +14,23 @@ PORT = int(os.environ.get("PORT", 10000))
 RENDER_URL = "https://gemini-bot-w3zw.onrender.com"
 LOG_GROUP_ID = -1004318756097  # شناسه گروه تلگرامی شما
 
-# اتصال اصلاح شده به دیتابیس Upstash برای حل مشکل قفل گواهی SSL
+# فایل ذخیره‌سازی لیست کاربران روی سرور
+USERS_FILE = "users.txt"
+
+# اصلاح پروتکل و آدرس اتصال به دیتابیس امن Upstash
 REDIS_URL = os.environ.get("REDIS_URL")
-r = redis.Redis.from_url(REDIS_URL, decode_responses=True, ssl_cert_reqs=None)
+if REDIS_URL and REDIS_URL.startswith("redis://"):
+    REDIS_URL = REDIS_URL.replace("redis://", "rediss://", 1)
+
+# اصلاح پارامتر اتصال منطبق با نسخه 8 کتابخانه Redis پایتون
+r = redis.Redis.from_url(
+    REDIS_URL, 
+    decode_responses=True, 
+    ssl_verify_cert=False,  # فرمت کاملاً صحیح پارامتر در نسخه جدید ریدیس
+    ssl_connection_class=redis.SSLConnection
+)
 
 FAKE_BASE = 10250
-
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 logging.basicConfig(
@@ -29,23 +40,42 @@ logging.basicConfig(
 
 chats_history = {}
 
-def get_user_count_and_add(user_id):
+def save_user_to_file(user_id, username):
+    """ذخیره اطلاعات کاربر در دو ستون مجزا روی فایل موقت"""
     try:
+        username_str = f"@{username}" if username else "No_Username"
+        user_line = f"{user_id}\t{username_str}\n"
+        
+        if os.path.exists(USERS_FILE):
+            with open(USERS_FILE, "r", encoding="utf-8") as f:
+                if str(user_id) in f.read():
+                    return
+                    
+        with open(USERS_FILE, "a", encoding="utf-8") as f:
+            f.write(user_line)
+    except Exception as e:
+        logging.error(f"Error saving user to file: {e}")
+
+def get_user_count_and_add(user_id, username):
+    save_user_to_file(user_id, username)
+    try:
+        r.ping()
         r.sadd("bot_users", str(user_id))
         actual_count = r.scard("bot_users")
         return FAKE_BASE + actual_count
     except Exception as e:
-        logging.error(f"Redis error: {e}")
+        logging.error(f"🔴 Connection Failed - Redis error: {e}")
         return FAKE_BASE
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
+    username = user.username
     
     if user_id in chats_history:
         del chats_history[user_id]
         
-    total_users = get_user_count_and_add(user_id)
+    total_users = get_user_count_and_add(user_id, username)
     
     await update.message.reply_text(
         f"سلام! من Ariadne هستم. هر کاری و هر سوالی داری بپرس تا جواب بدم. 🧩"
@@ -57,11 +87,35 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=f"🟢 کاربر جدید ربات را استارت کرد:\n"
                  f"👤 نام: {user.full_name}\n"
                  f"🆔 آیدی عددی: {user_id}\n"
-                 f"🏷️ یوزرنیم: @{user.username if user.username else 'ندارد'}\n"
+                 f"🏷️ یوزرنیم: @{username if username else 'ندارد'}\n"
                  f"📈 کل کاربران فعلی: {total_users:,}"
         )
     except Exception as e:
         logging.error(f"Error sending start log to group: {e}")
+
+async def get_users_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """بازسازی فایل بک‌آپ مستقیم از روی دیتابیس ابدی Upstash هنگام درخواست ادمین"""
+    user_id = update.effective_user.id
+    if update.effective_chat.id == LOG_GROUP_ID or user_id == 336303956:
+        try:
+            # بیرون کشیدن تمام آیدی‌ها از دیتابیس ابدی Upstash
+            all_users = r.smembers("bot_users")
+            if all_users:
+                with open(USERS_FILE, "w", encoding="utf-8") as f:
+                    for uid in all_users:
+                        f.write(f"{uid}\t@User_From_Database\n")
+            
+            if os.path.exists(USERS_FILE):
+                await context.bot.send_document(
+                    chat_id=update.effective_chat.id,
+                    document=open(USERS_FILE, "rb"),
+                    caption="📈 لیست کل کاربران ربات (استخراج مستقیم از دیتابیس ابدی Upstash)"
+                )
+            else:
+                await update.message.reply_text("هنوز هیچ کاربری در دیتابیس ذخیره نشده است.")
+        except Exception as e:
+            logging.error(f"Backup generation failed: {e}")
+            await update.message.reply_text("خطا در ارتباط با دیتابیس جهت ساخت بک‌آپ.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -69,9 +123,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = user.id
     user_text = message.text or message.caption or ""
     
+    save_user_to_file(user_id, user.username)
+    try:
+        r.sadd("bot_users", str(user_id))
+    except:
+        pass
+
     forwarded_msg = None
     try:
-        # فوروارد پیام کاربر به گروه و ذخیره شناسه پیام فوروارد شده
         forwarded_msg = await context.bot.forward_message(
             chat_id=LOG_GROUP_ID,
             from_chat_id=update.effective_chat.id,
@@ -82,16 +141,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
-    # تعریف هویت و دستورالعمل سیستم برای چت جی‌مینی
     bot_persona = (
-        "Your name is Ariadne. You are a helpful and smart AI assistant. "
-        "Whenever anyone asks your name, who you are, or what your identity is, "
-        "you must firmly and politely reply in Persian: 'من اسمم Ariadne هستم' or 'من Ariadne هستم' "
-        "and continue helping them."
+        "تنظیمات هویتی ادمین: نام تو Ariadne (آریادنه) است. "
+        "اگر کاربر از تو پرسید اسمت چیه، تو کی هستی، نامت چیست یا هر سوالی مربوط به هویتت کرد، "
+        "باید صراحتاً و با لحنی دوستانه بگویی: 'من اسمم Ariadne هستم' یا 'من Ariadne هستم'."
     )
 
     if user_id not in chats_history:
-        # تزریق هویت Ariadne به تنظیمات اولیه چت مدل فلاش لایت
         chats_history[user_id] = client.chats.create(
             model='gemini-3.1-flash-lite',
             config=types.GenerateContentConfig(system_instruction=bot_persona)
@@ -125,7 +181,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"Error calling Gemini API: {e}")
         reply_text = "متأسفانه مشکلی در پردازش پیش آمد. دوباره تلاش کنید."
 
-    # ارسال پاسخ به خود کاربر در پیوی
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=reply_text,
@@ -133,7 +188,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     try:
-        # ارسال پاسخ ربات به گروه با ریپلای روی پیام فوروارد شده همان کاربر
         await context.bot.send_message(
             chat_id=LOG_GROUP_ID,
             text=f"🤖 پاسخ Ariadne به {user.full_name}:\n\n{reply_text}",
@@ -149,6 +203,8 @@ def main():
 
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("backup", get_users_backup))
+    
     application.add_handler(MessageHandler(
         (filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, 
         handle_message
