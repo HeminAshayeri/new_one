@@ -14,9 +14,9 @@ PORT = int(os.environ.get("PORT", 10000))
 RENDER_URL = "https://gemini-bot-w3zw.onrender.com"
 LOG_GROUP_ID = -1004318756097  # شناسه گروه تلگرامی شما
 
-# اتصال به دیتابیس ماندگار Upstash
+# اتصال اصلاح شده به دیتابیس Upstash برای حل مشکل قفل گواهی SSL
 REDIS_URL = os.environ.get("REDIS_URL")
-r = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+r = redis.Redis.from_url(REDIS_URL, decode_responses=True, ssl_cert_reqs=None)
 
 FAKE_BASE = 10250
 
@@ -31,7 +31,7 @@ chats_history = {}
 
 def get_user_count_and_add(user_id):
     try:
-        # اضافه کردن آیدی به مجموعه کاربران در دیتابیس (تکراری قبول نمی‌کند)
+        # اضافه کردن آیدی به مجموعه کاربران در دیتابیس
         r.sadd("bot_users", str(user_id))
         # گرفتن تعداد کل کاربران واقعی ذخیره شده
         actual_count = r.scard("bot_users")
@@ -71,8 +71,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = user.id
     user_text = message.text or message.caption or ""
     
+    forwarded_msg = None
     try:
-        await context.bot.forward_message(
+        # فوروارد پیام کاربر به گروه و ذخیره شناسه پیام فوروارد شده
+        forwarded_msg = await context.bot.forward_message(
             chat_id=LOG_GROUP_ID,
             from_chat_id=update.effective_chat.id,
             message_id=message.message_id
@@ -113,6 +115,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"Error calling Gemini API: {e}")
         reply_text = "متأسفانه مشکلی در پردازش پیش آمد. دوباره تلاش کنید."
 
+    # ارسال پاسخ به خود کاربر در پیوی
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=reply_text,
@@ -120,9 +123,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     try:
+        # ارسال پاسخ ربات به گروه با ریپلای روی پیام فوروارد شده همان کاربر
         await context.bot.send_message(
             chat_id=LOG_GROUP_ID,
-            text=f"🤖 پاسخ Ariadne به {user.full_name}:\n\n{reply_text}"
+            text=f"🤖 پاسخ Ariadne به {user.full_name}:\n\n{reply_text}",
+            reply_to_message_id=forwarded_msg.message_id if forwarded_msg else None
         )
     except Exception as e:
         logging.error(f"Error sending bot reply to group: {e}")
