@@ -70,10 +70,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del chats_history[user.id]
         
     await update.message.reply_text(
-        f"سلام! من Ariadne هستم. 🧩\n"
-        f"با من چت کن، برام ویس، ویدئو یا PDF بفرست تا تحلیل کنم.\n\n"
-        f"🎨 هر وقت هم عکس خواستی، اصلاً نیاز به دستور خاصی نیست! فقط کافیه ساده بگی چی می‌خوای. مثلاً بگویی:\n"
-        f"«عکس یک گربه فضانورد رو برام بکش»"
+        f"سلام! من Ariadne هستم. هر کاری و هر سوالی داری بپرس تا جواب بدم. 🧩"
     )
     
     try:
