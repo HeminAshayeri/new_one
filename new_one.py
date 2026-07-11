@@ -1,127 +1,128 @@
 import os
 import logging
-import io
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-# استفاده از پکیج جدید و رسمی گوگل
 from google import genai
 from google.genai import types
-
+from aiohttp import web
 import asyncio
 
-# ۱. خواندن توکن‌ها از بخش Environment Variables سرور رندر
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+# رندر خودش این متغیر را به ما می‌دهد، اگر نبود روی ۱۰۰۰۰ تنظیم می‌شود
+PORT = int(os.environ.get("PORT", 10000))
+# آدرس یو‌آر‌ال ربات شما در رندر
+RENDER_URL = "https://gemini-bot-w3zw.onrender.com"
 
-# ۲. ساخت کلاینت جمینی با پکیج جدید google-genai
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# فعال‌سازی سیستم لاگ برای دیدن وضعیت در پنل رندر
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 
-# دستور /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "سلام! من بات متصل به جمینی هستم. علاوه بر پیام متنی، می‌تونی برام عکس یا فایل PDF بفرستی و همراهش سوالت رو بپرسی تا برات تحلیلش کنم! 📸📄"
-    )
+chats_history = {}
 
-# پردازش جامع پیام‌ها (متن، عکس، فایل)
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id in chats_history:
+        del chats_history[user_id]
+    await update.message.reply_text("سلام! من جمینی با حافظه بلندمدت و متصل به وب‌هوک هستم! دیگه هیچ‌وقت نمی‌خوابم. 🧠")
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    user_text = message.text or message.caption or "این فایل یا تصویر را بررسی و تحلیل کن."
+    user_id = update.effective_user.id
+    user_text = message.text or message.caption or ""
     
-    # محتویاتی که قرار است به جمینی فرستاده شود
-    contents = [user_text]
-
-    # ارسال وضعیت در حال تایپ به تلگرام
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
+    if user_id not in chats_history:
+        chats_history[user_id] = client.chats.create(model='gemini-3.1-flash-lite')
+    
+    chat_session = chats_history[user_id]
+    contents = []
+
     try:
-        # الف) بررسی وجود عکس
         if message.photo:
-            # گرفتن باکیفیت‌ترین نسخه عکس
             photo_file = await message.photo[-1].get_file()
             photo_bytes = await photo_file.download_as_bytearray()
-            
-            # آماده‌سازی تصویر برای متد جدید جمینی
-            image_part = types.Part.from_bytes(
-                data=bytes(photo_bytes),
-                mime_type="image/jpeg"
-            )
+            image_part = types.Part.from_bytes(data=bytes(photo_bytes), mime_type="image/jpeg")
             contents.append(image_part)
-            
-        # ب) بررسی وجود فایل (مثل PDF یا داکیومنت‌ها)
-        elif message.document:
-            doc = message.document
-            # بررسی فرمت فایل
-            if doc.mime_type == "application/pdf":
-                doc_file = await doc.get_file()
-                doc_bytes = await doc_file.download_as_bytearray()
-                
-                # آماده‌سازی PDF برای متد جدید جمینی
-                pdf_part = types.Part.from_bytes(
-                    data=bytes(doc_bytes),
-                    mime_type="application/pdf"
-                )
-                contents.append(pdf_part)
-            else:
-                await message.reply_text("⚠️ در حال حاضر فقط فایل‌های PDF و تصاویر پشتیبانی می‌شوند.")
+            contents.append(user_text if user_text else "این تصویر را تحلیل کن.")
+        elif message.document and message.document.mime_type == "application/pdf":
+            doc_file = await message.document.get_file()
+            doc_bytes = await doc_file.download_as_bytearray()
+            pdf_part = types.Part.from_bytes(data=bytes(doc_bytes), mime_type="application/pdf")
+            contents.append(pdf_part)
+            contents.append(user_text if user_text else "این فایل PDF را تحلیل کن.")
+        else:
+            if not user_text:
                 return
+            contents = user_text
 
-        # ارسال درخواست به جمینی
-        response = client.models.generate_content(
-            model='gemini-3.1-flash-lite',
-            contents=contents,
-        )
+        response = chat_session.send_message(contents)
         reply_text = response.text
         
     except Exception as e:
         logging.error(f"Error calling Gemini API: {e}")
-        reply_text = "متأسفانه در پردازش این درخواست مشکلی پیش اومد. لطفاً دوباره تلاش کنید."
+        reply_text = "متأسفانه مشکلی در پردازش پیش آمد. دوباره تلاش کنید."
 
-    # فرستادن پاسخ با ریپلای مستقیم روی خود پیام/فایل کاربر  ✅
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=reply_text,
         reply_to_message_id=message.message_id
     )
 
-# راه اندازی اصلی بات
 def main():
     if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
-        print("خطا: توکن تلگرام یا جمینی تعریف نشده است!")
+        print("خطا: توکن‌ها تعریف نشده‌اند!")
         return
 
-    # ساخت اپلیکیشن تلگرام
+    # ۱. ساخت اپلیکیشن تلگرام
     application = Application.builder().token(TELEGRAM_TOKEN).build()
-
-    # تعریف هندلرها
     application.add_handler(CommandHandler("start", start))
-    
-    # فیلتر جدید: ربات علاوه بر متن، به عکس‌ها و داکیومنت‌ها هم گوش می‌دهد
     application.add_handler(MessageHandler(
         (filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, 
         handle_message
     ))
 
-    print("بات تلگرام با قابلیت پردازش فایل و عکس روی رندر روشن شد...")
-    
-    # مدیریت استاندارد لوپ برای پایتون ۳.۱۴ روی رندر
+    # ۲. تنظیم دسترسی لوپ پایتون
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
+
+    # مقداردهی اولیه ربات
     loop.run_until_complete(application.initialize())
-    loop.run_until_complete(application.updater.start_polling())
+    
+    # ست کردن وب‌هوک در سرور تلگرام
+    webhook_url = f"{RENDER_URL}/telegram"
+    loop.run_until_complete(application.bot.set_webhook(url=webhook_url))
+    logging.info(f"Webhook set to: {webhook_url}")
+
+    # ۳. ساخت سرور وب واقعی با aiohttp برای پاسخ به تلگرام و رندر
+    async def telegram_webhook(request):
+        try:
+            data = await request.json()
+            update = Update.de_json(data, application.bot)
+            await application.process_update(update)
+        except Exception as e:
+            logging.error(f"Error processing update: {e}")
+        return web.Response(text="OK")
+
+    async def health_check(request):
+        return web.Response(text="I am alive!")
+
+    app = web.Application()
+    app.router.add_post('/telegram', telegram_webhook)
+    app.router.add_get('/', health_check) # این همان صفحه‌ایست که رندر چک می‌کند
+
+    # شروع ربات
     loop.run_until_complete(application.start())
     
-    # زنده نگه داشتن برنامه
-    loop.run_forever()
+    # اجرای سرور روی پورت ۱۰۰۰۰
+    web.run_app(app, host="0.0.0.0", port=PORT, loop=loop)
 
 if __name__ == '__main__':
     main()
