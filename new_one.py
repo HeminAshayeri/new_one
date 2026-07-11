@@ -84,39 +84,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logging.error(f"Error sending start log: {e}")
 
-async def generate_and_send_image(chat_id, prompt, reply_to_id, user_full_name):
-    """تابع کمکی برای تولید تصویر با Imagen 3 و ارسال آن"""
-    try:
-        result = client.models.generate_images(
-            model='imagen-3.0-generate-002',
-            prompt=prompt,
-            config=types.GenerateImagesConfig(
-                number_of_images=1,
-                output_mime_type="image/jpeg",
-                aspect_ratio="1:1"
-            )
-        )
-        for generated_image in result.generated_images:
-            image_bytes = generated_image.image.image_bytes
-            
-            # ارسال به کاربر
-            await client.aio.apps.bot.send_photo( # استفاده مستقیم از کانتکست ربات تلگرام
-                chat_id=chat_id,
-                photo=image_bytes,
-                caption=f"🎨 طرح درخواستی شما با موفقیت خلق شد!\n💡 متن شما: {prompt}",
-                reply_to_message_id=reply_to_id
-            )
-            # ارسال به گروه لاگ
-            await client.aio.apps.bot.send_photo(
-                chat_id=LOG_GROUP_ID,
-                photo=image_bytes,
-                caption=f"🎨 طرح ساخته شده برای کاربر {user_full_name}:\n{prompt}"
-            )
-            return True
-    except Exception as e:
-        logging.error(f"Error in Imagen API: {e}")
-        return False
-
 async def handle_multimedia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     user = update.effective_user
@@ -134,20 +101,27 @@ async def handle_multimedia(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     except Exception as e: logging.error(f"Forward error: {e}")
 
-    # ترفند هوشمند: تشخیص خودکار درخواست عکس بدون نیاز به دستور /draw
+    # تشخیص هوشمند درخواست عکس
     trigger_words = ["بکش", "طراحی کن", "نقاشی کن", "عکس بساز", "تصویر بساز", "draw", "paint"]
     is_drawing_request = any(word in user_text.lower() for word in trigger_words)
 
     if is_drawing_request and not (message.photo or message.video or message.voice or message.audio or message.document):
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
         try:
+            # استفاده از نام مدل استاندارد و بدون پیشوند جهت هماهنگی با API نسخه جدید گوگل
             result = client.models.generate_images(
                 model='imagen-3.0-generate-002',
                 prompt=user_text,
-                config=types.GenerateImagesConfig(number_of_images=1, output_mime_type="image/jpeg", aspect_ratio="1:1")
+                config=types.GenerateImagesConfig(
+                    number_of_images=1, 
+                    output_mime_type="image/jpeg", 
+                    aspect_ratio="1:1"
+                )
             )
             for generated_image in result.generated_images:
                 image_bytes = generated_image.image.image_bytes
+                
+                # رفع باگ ارسال عکس تلگرام
                 await context.bot.send_photo(
                     chat_id=update.effective_chat.id,
                     photo=image_bytes,
@@ -165,7 +139,7 @@ async def handle_multimedia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ متأسفانه درخواست طراحی عکس با خطا مواجه شد یا توسط فیلتر محتوای گوگل رد شد.")
             return
 
-    # ادامه روال عادی برای پیام‌های متنی یا سایر فایل‌ها
+    # روال عادی پیام‌ها و مولتی‌مدیا
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
     bot_persona = (
