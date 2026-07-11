@@ -73,10 +73,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"سلام! من Ariadne هستم. هر کاری و هر سوالی داری بپرس تا جواب بدم. 🧩"
     )
     
+    username_text = f"@{user.username}" if user.username else "ندارد"
+    
     try:
         await context.bot.send_message(
             chat_id=LOG_GROUP_ID,
-            text=f"🟢 کاربر جدید ربات را استارت کرد:\n👤 نام: {user.full_name}\n🆔 آیدی: {user.id}\n 🏷️ یوزرنیم: {user.username}\n📈 کل کاربران: {total_users:,}"
+            text=(
+                f"🟢 کاربر جدید ربات را استارت کرد:\n"
+                f"👤 نام: {user.full_name}\n"
+                f"🆔 آیدی عددی: {user.id}\n"
+                f"🏷️ یوزرنیم: {username_text}\n"
+                f"📈 کل کاربران: {total_users:,}"
+            )
         )
     except Exception as e:
         logging.error(f"Error sending start log: {e}")
@@ -105,7 +113,6 @@ async def handle_multimedia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_drawing_request and not (message.photo or message.video or message.voice or message.audio or message.document):
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
         try:
-            # استفاده از نام مدل استاندارد و بدون پیشوند جهت هماهنگی با API نسخه جدید گوگل
             result = client.models.generate_images(
                 model='imagen-3.0-generate-002',
                 prompt=user_text,
@@ -118,7 +125,6 @@ async def handle_multimedia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for generated_image in result.generated_images:
                 image_bytes = generated_image.image.image_bytes
                 
-                # رفع باگ ارسال عکس تلگرام
                 await context.bot.send_photo(
                     chat_id=update.effective_chat.id,
                     photo=image_bytes,
