@@ -27,7 +27,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id in chats_history:
         del chats_history[user_id]
-    await update.message.reply_text("سلام! من جمینی با حافظه بلندمدت و متصل به وب‌هوک هستم! دیگه هیچ‌وقت نمی‌خوابم. 🧠")
+    await update.message.reply_text(
+        "سلام! من آریادنه (Ariadne) هستم؛ معمار هوش مصنوعی شما. 🧩\n\n"
+        "هر کاری و هر سوالی داری بپرس تا جواب بدم."
+    )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
