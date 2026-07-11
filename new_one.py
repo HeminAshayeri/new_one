@@ -22,13 +22,15 @@ REDIS_URL = os.environ.get("REDIS_URL")
 if REDIS_URL and REDIS_URL.startswith("redis://"):
     REDIS_URL = REDIS_URL.replace("redis://", "rediss://", 1)
 
-# اصلاح پارامتر اتصال منطبق با نسخه 8 کتابخانه Redis پایتون
-r = redis.Redis.from_url(
-    REDIS_URL, 
-    decode_responses=True, 
-    ssl_verify_cert=False,  # فرمت کاملاً صحیح پارامتر در نسخه جدید ریدیس
-    ssl_connection_class=redis.SSLConnection
-)
+# روش فوق‌العاده سازگار و منعطف بدون استفاده از پارامترهای تغییرپذیر نسخه‌ای
+# اضافه کردن کل ترفند امنیتی مستقیماً به انتهای آدرس URL جهت دور زدن ارور ورژن کتابخانه
+if REDIS_URL and "ssl_cert_reqs" not in REDIS_URL:
+    if "?" in REDIS_URL:
+        REDIS_URL += "&ssl_cert_reqs=none"
+    else:
+        REDIS_URL += "?ssl_cert_reqs=none"
+
+r = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
 FAKE_BASE = 10250
 client = genai.Client(api_key=GEMINI_API_KEY)
@@ -98,7 +100,6 @@ async def get_users_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if update.effective_chat.id == LOG_GROUP_ID or user_id == 336303956:
         try:
-            # بیرون کشیدن تمام آیدی‌ها از دیتابیس ابدی Upstash
             all_users = r.smembers("bot_users")
             if all_users:
                 with open(USERS_FILE, "w", encoding="utf-8") as f:
