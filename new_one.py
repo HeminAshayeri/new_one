@@ -10,9 +10,10 @@ import redis
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+LOG_GROUP_ID = os.environ.get("LOG_GROUP_ID")  # شناسه گروه تلگرامی شما
 PORT = int(os.environ.get("PORT", 10000))
 RENDER_URL = "https://gemini-bot-w3zw.onrender.com"
-LOG_GROUP_ID = -1004318756097  # شناسه گروه تلگرامی شما
+
 
 USERS_FILE = "users.txt"
 
@@ -145,10 +146,13 @@ async def handle_multimedia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # روال عادی پیام‌ها و مولتی‌مدیا
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
+    # اصلاح پرسونای ربات برای جلوگیری از تکرار خودکار نام در پیام‌های عادی
     bot_persona = (
-        "تنظیمات هویتی ادمین: نام تو Ariadne (آریادنه) است. "
-        "اگر کاربر از تو پرسید اسمت چیه، تو کی هستی، نامت چیست یا هر سوالی مربوط به هویتت کرد، "
-        "باید صراحتاً و با لحنی دوستانه بگویی: 'من اسمم Ariadne هستم' یا 'من Ariadne هستم'."
+        "Your name is Ariadne (آریادنه). "
+        "Do NOT introduce yourself, do NOT say 'سلام من آریادنه هستم' or mention your name at the beginning of your answers. "
+        "Go straight to answering the user's question or analyzing their file/image. "
+        "ONLY if the user explicitly asks about your identity, name, or who you are (e.g., 'اسمت چیه؟', 'تو کی هستی؟', 'خودتو معرفی کن'), "
+        "then politely answer: 'من Ariadne هستم'."
     )
 
     if user_id not in chats_history:
